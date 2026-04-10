@@ -52,3 +52,20 @@ WAREHOUSE_NAME_FIXES = {
     "УФА-Уфа": "Уфа-Уфа",
 }
 INVENTORY_SUFFIX = "_АГ"  # суффикс в названиях складов в файле остатков
+
+
+# === Тарифный модуль ===
+# Пути к вспомогательным файлам для расчёта тарифов новых авто-маршрутов.
+# Если файлы не указаны (None) — тарифный модуль не запускается.
+
+# CSV с соседними регионами: колонки region, neighbor_region, order_num
+TARIFF_NEIGHBORS_PATH: str | None = None  # пример: "data/neighbors.csv"
+
+# CSV с маппингом город -> регион: колонки city, region
+TARIFF_CITY_REGION_PATH: str | None = None  # пример: "data/city_region.csv"
+
+# Название колонки тарифа в Excel-отчёте на листе «Потоки»
+TARIFF_COLUMN_NAME = "Тариф авто, руб/т"
+
+# Добавлять ли отдельный лист «Тарифы авто» в Excel-отчёт
+TARIFF_EXPORT_SHEET = True
