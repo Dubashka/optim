@@ -327,6 +327,9 @@ def prepare_model_data(df, wh_costs, wh_cap, inv_raw, config):
     # Конвертируем df_fixed обратно в pandas для solve()
     df_fixed_pd = df_fixed.to_pandas()
 
+    # Сохраняем исходный df отгрузок для тарифного модуля
+    df_shipments_pd = df.to_pandas()
+
     data = {
         "warehouses": warehouses, "wh_set": wh_set, "pgs": pgs,
         "months": months, "days_in_month": days_in_month,
@@ -350,6 +353,7 @@ def prepare_model_data(df, wh_costs, wh_cap, inv_raw, config):
         },
         "sw_df": sw_df.to_pandas(), "wc_df": wc_df.to_pandas(), "ww_df": ww_df.to_pandas(),
         "df_fixed": df_fixed_pd,
+        "df_shipments": df_shipments_pd,
     }
     print(f"  Подготовка данных (Polars): {time.time()-t0:.0f}с")
     print(f"  Дуги: SW={len(all_sw)}, WC={len(all_wc)}, WW={len(all_ww)}")
@@ -655,6 +659,31 @@ def solve(data, config):
 
     flows_df = pd.DataFrame(flows) if flows else pd.DataFrame()
 
+    # --- Тарифный модуль ---
+    tariff_df = pd.DataFrame()
+    neighbors_path = getattr(config, "TARIFF_NEIGHBORS_PATH", None)
+    city_region_path = getattr(config, "TARIFF_CITY_REGION_PATH", None)
+    if not flows_df.empty:
+        try:
+            from tariff_calculator import (
+                build_tariff_reference,
+                load_neighbors,
+                load_city_region,
+                assign_tariffs,
+            )
+            df_shipments = D.get("df_shipments")
+            if df_shipments is not None and len(df_shipments) > 0:
+                refs = build_tariff_reference(df_shipments)
+                neighbors = load_neighbors(neighbors_path) if neighbors_path else {}
+                city_region = load_city_region(city_region_path) if city_region_path else {}
+                flows_df, tariff_df = assign_tariffs(
+                    flows_df, refs, neighbors, city_region,
+                    tariff_col=getattr(config, "TARIFF_COLUMN_NAME", "Тариф авто, руб/т"),
+                )
+                print(f"  Тарифный модуль: {len(tariff_df)} новых авто-маршрутов")
+        except Exception as e:
+            print(f"  [WARN] Тарифный модуль пропущен: {e}")
+
     # Таблица спроса
     demand_rows = []
     for k, vol in D["dd"].items():
@@ -694,6 +723,7 @@ def solve(data, config):
         "as_is": D["as_is"],
         "flows": flows_df,
         "demand": demand_df,
+        "tariffs": tariff_df,
     }
     return results
 
@@ -729,8 +759,9 @@ def build_summary(results: dict) -> pd.DataFrame:
     return df
 
 
-def save_results(results: dict, output_file: str):
+def save_results(results: dict, output_file: str, config=None):
     summary = build_summary(results)
+    export_tariff_sheet = getattr(config, "TARIFF_EXPORT_SHEET", True) if config else True
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         summary.to_excel(writer, sheet_name="Сводка", index=False)
         flows = results.get("flows")
@@ -739,4 +770,8 @@ def save_results(results: dict, output_file: str):
         demand = results.get("demand")
         if demand is not None and len(demand) > 0:
             demand.to_excel(writer, sheet_name="Спрос", index=False)
+        if export_tariff_sheet:
+            tariffs = results.get("tariffs")
+            if tariffs is not None and isinstance(tariffs, pd.DataFrame) and len(tariffs) > 0:
+                tariffs.to_excel(writer, sheet_name="Тарифы авто", index=False)
     print(f"  Результаты сохранены: {output_file}")
